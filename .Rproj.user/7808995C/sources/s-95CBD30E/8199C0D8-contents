@@ -1,0 +1,249 @@
+
+
+# Question:
+
+* The way we do function anntation for micrbiome is basically doing blast agaist know fasta sequence with known functions.
+* Currently one of the good quality annotation database is [EggNOG mappper](http://eggnog-mapper.embl.de/). 
+* MetaLab also adopted this [blast strategy](https://wiki.imetalab.ca/#How%20does%20metalab%20annotate%20the%20database%3F)
+* One detrimental problem of this workflow is that one seuqnece mostly likely has multiple function annotation. This brings out the practical question: shall I use the first matched function or use all of them? 
+  + The simplest way is using the first one
+  + Using all items is not impossible, but requires a lot of data transformation. 
+  + which one is right/better? what is the relationship between these two?
+  
+  
+Here we check this using one example to explore the effect. 
+The annotation table functions.csv is directly from MetaLab (above 2.1, with the new function anotation databawe from EggNOG 5.0, see how it is [generated](https://wiki.imetalab.ca/#How%20does%20metalab%20annotate%20the%20database%3F) )
+
+
+In this example, we use KEGG.name column as an example.
+Check other columns/functions as you want.
+avaliable functions are:
+
+"Gene_Ontology_id"        
+"Gene_Ontology_name"      
+"Gene_Ontology_namespace" 
+"EC_id"                   
+"EC_de"                  
+"EC_an"                   
+"EC_ca"                   
+"KEGG_ko"                 
+"KEGG.accession"          
+"KEGG.name"              
+"KEGG_Module"             
+"KEGG_Reaction"           
+"KEGG_rclass"             
+"BRITE"                   
+"KEGG_TC"                
+"CAZy"                    
+"BiGG_Reaction"           
+"COG.accession"           
+"COG.name"                
+"COG.category"           
+"NOG.accession"           
+"NOG.name"                
+"NOG.category"            
+"eggNOG_description"
+
+
+## Prepare data
+
+functions.csv can be found [here](#):
+
+Psedo code:
+* readin the file, with the option of na.strings = "" to put NA for rows without matched function names
+* ony keep the selected function column and the intensity columns
+* remove rows without matched function names
+* split the funtion names, either keep all for the "flatten" data, or keep the first the "first" test
+* calculate the mean according to the function name
+
+Some facts
+* using only the first one will loss quite a lot of function items
+* "first" data is a subset of the "flatten" data 
+* the function items are listed without obvious orders
+
+
+
+```{r message =FALSE}
+library(tidyverse)
+library(reshape2)
+library(tidytext)
+
+data_fun <- read.csv("functions.csv", header = TRUE, sep = ",",na.strings = "")
+
+# data_fun <- data_fun[!duplicated(data_fun$Group_ID),] # if the table has multiple lines from teh same protein group, 
+
+target_column_name <- "KEGG.name" # choose the column to test, here we use KEGG.name for testing
+
+df_func_intensity_flatten_mean <- data_fun %>% 
+  select(c(target_column_name, starts_with("Intensity"))) %>% 
+  drop_na(any_of(target_column_name)) %>% 
+  tidytext::unnest_tokens(.,function_name, target_column_name, token = "regex", pattern = ",\\s*") %>% 
+  select(-1) %>% 
+  group_by(function_name) %>% 
+  summarise_all(mean)
+  
+
+# only use the first one, aggregate
+df_func_intensity_first_mean<- data_fun %>% 
+  select(c(target_column_name, starts_with("Intensity"))) %>% 
+  drop_na(any_of(target_column_name)) %>% 
+  separate(target_column_name, "function_name", extra =  'drop',sep = ",") %>% 
+  mutate(function_name = tolower(function_name)) %>% 
+  group_by(function_name) %>% 
+  summarise_all(mean)
+
+```
+
+
+Now we have the 2 data table
+
+* df_func_intensity_flatten_mean has `r nrow(df_func_intensity_flatten_mean)` unique function items 
+* df_func_intensity_first_mean has `r nrow(df_func_intensity_first_mean)` unique function items
+
+## Overal profile of the overlapped data
+
+
+For better visualization/comparision of the consistency, log10 value is used and data is scaled by row
+
+```{r message= FALSE}
+# check the overlap of the two method 
+func_compare_intensity <- inner_join(df_func_intensity_flatten_mean, df_func_intensity_first_mean, by = c("function_name"),suffix = c(".flatten", ".first"))
+
+
+# prepare the matrix to plot
+func_compare_intensity_plot <- func_compare_intensity %>% 
+  column_to_rownames('function_name') %>% 
+  rename_with(~gsub("Intensity.Experiment_","",.)) %>% 
+  +1 %>% 
+  log10() %>% 
+  filter_all(any_vars(. != 0)) %>% 
+  as.matrix()
+
+```
+```{r}
+# plot heatmap without  column clustering
+gplots::heatmap.2(func_compare_intensity_plot, scale = "row",Colv = FALSE, dendrogram  = "row", trace  = "none")
+
+pheatmap::pheatmap(func_compare_intensity_plot,scale = "row", cluster_cols = FALSE)
+
+```
+
+
+## Profile of the flatten only
+
+
+```{r message =FALSE}
+# check what functions are only in flattern way
+df_func_intensity_falltern_only <- df_func_intensity_flatten_mean[!df_func_intensity_flatten_mean$function_name %in% func_compare_intensity$function_name,]
+
+df_func_intensity_falltern_only <- df_func_intensity_falltern_only %>% 
+  column_to_rownames('function_name') %>% 
+  rename_with(~gsub("Intensity.Experiment_","",.)) %>% 
+  +1 %>% 
+  #log10() %>% 
+  filter_all(any_vars(. != 0)) %>% 
+  as.matrix()
+
+```
+
+You will lose all the following flatten-only functions if you only use the first one for your analysis:
+
+ `r paste0(rownames(df_func_intensity_falltern_only), sep = "\\n")`
+ 
+
+Here the orignial intensity data is used to highlight the abundance, showing how many abuandant function items would be lost in this workflow
+
+```{r}
+
+pheatmap::pheatmap(df_func_intensity_falltern_only, cluster_cols = FALSE)
+
+```
+
+## see Abundance Correlation between flatten and first
+
+```{r message=FALSE}
+# melt the aggretated matrix with intensity values
+df_func_intensity_flatten_mean_melt <- melt(df_func_intensity_flatten_mean, id = "function_name")
+df_func_intensity_first_mean_melt <- melt(df_func_intensity_first_mean, id = "function_name")
+
+# join the two df
+p <- inner_join(df_func_intensity_flatten_mean_melt, df_func_intensity_first_mean_melt, by = c("function_name", "variable"),suffix = c(".flatten", ".first")) %>%
+  mutate(value.flatten = value.flatten+1, value.first =value.first+1) %>% 
+  mutate(variable = as.factor(variable)) %>% 
+  ggplot() + 
+  geom_point(aes(x = value.flatten, y=value.first)) + 
+  scale_x_continuous(trans='log10') +
+  scale_y_continuous(trans='log10') +
+  ggtitle("Abundance Correlation between first item and all")
+
+
+```
+```{r}
+p
+
+# facet plot
+p+facet_wrap(vars(variable))
+```
+
+
+Some dots on x axis (with value.first as zero skewed the plot.
+Let's replot with remove all these values
+
+
+```{r message= FALSE}
+# join the two df
+p <- inner_join(df_func_intensity_flatten_mean_melt, df_func_intensity_first_mean_melt, by = c("function_name", "variable"),suffix = c(".flatten", ".first")) %>%
+  filter(value.flatten>1, value.first >1) %>% 
+  mutate(value.flatten = value.flatten+1, value.first =value.first+1) %>% 
+  mutate(variable = as.factor(variable)) %>% 
+  ggplot() + 
+  geom_point(aes(x = value.flatten, y=value.first)) + 
+  scale_x_continuous(trans='log10') +
+  scale_y_continuous(trans='log10') +
+  ggtitle("Abundance Correlation between first item and all")
+
+```
+
+```{r}
+p
+
+p+facet_wrap(vars(variable))
+
+```
+
+
+let's print all the plots for each function
+check this pdf file [here](#)
+
+```{r eval=FALSE}
+
+# print out all KEGG correlation plot
+
+corr_intensity <- inner_join(df_func_intensity_flatten_mean_melt, df_func_intensity_first_mean_melt, by = c("function_name", "variable"),suffix = c(".flatten", ".first")) %>%
+  mutate(value.flatten = value.flatten+1, value.first =value.first+1) %>% 
+  mutate(variable = as.factor(variable))
+
+func_list <- corr_intensity$function_name %>% unique()
+
+pdf("all_function_KEGG.pdf")
+
+for(i in 1:length(func_list)){
+ p <-  corr_intensity %>% filter(function_name == func_list[i]) %>% ggplot() +
+  geom_point(aes(x = value.flatten, y=value.first)) +
+  scale_x_continuous(trans='log10') +
+  scale_y_continuous(trans='log10')+
+   ggtitle(func_list[i])
+ print(p)
+ 
+}
+
+dev.off()
+
+
+```
+
+## sessionInfo
+```{r}
+sessionInfo()
+```
+
