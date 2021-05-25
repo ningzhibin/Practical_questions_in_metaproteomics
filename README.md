@@ -1,26 +1,10 @@
 
-# Metalab development wiki
+# Some practical questions about metaprotomics data analysis
 
-## Websites 
-
-* [imetalab websites related](https://github.com/northomics/Metalab_development_wiki/wiki/Metalab-websites)
-
-## Metalab Desktop
-
-* [MetaLab Desktop related](https://github.com/northomics/Metalab_development_wiki/wiki/Metalab-Desktop)
-
-* [How the function database generated?](https://github.com/northomics/Metalab_development_wiki/wiki/function_annatation)
+* [how to deal with function redundancy](./how_to_deal_with_function_redundancy.html)
 
 
-## Opencpu server
-- [About opencpu server](https://github.com/northomics/Metalab_development_wiki/wiki/openCPU_server) 
-- [Set up a new opencpu server](https://github.com/northomics/Metalab_development_wiki/wiki/openCPU_setup)
 
-
-## MetalLab output
-
-- [biom file](https://github.com/northomics/Metalab_development_wiki/wiki/output_biom) 
-
-
+(readme)
 
 ****

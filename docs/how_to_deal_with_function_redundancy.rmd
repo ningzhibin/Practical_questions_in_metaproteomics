@@ -47,7 +47,7 @@ avaliable functions are:
 
 ## Prepare data
 
-functions.csv can be found [here](#):
+functions.csv can be found [here](./functions.csv):
 
 Psedo code:
 * readin the file, with the option of na.strings = "" to put NA for rows without matched function names
@@ -213,7 +213,7 @@ p+facet_wrap(vars(variable))
 
 
 let's print all the plots for each function
-check this pdf file [here](#)
+check this pdf file [here](./all_function_KEGG.pdf)
 
 ```{r eval=FALSE}
 
