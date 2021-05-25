@@ -137,7 +137,7 @@ Now we have the 2 data table
 * df_func_intensity_flatten_mean has `r nrow(df_func_intensity_flatten_mean)` unique function items 
 * df_func_intensity_first_mean has `r nrow(df_func_intensity_first_mean)` unique function items
 
-## Overal profile of the overlapped data
+# Overal profile of the overlapped data
 
 
 For better visualization/comparision of the consistency, log10 value is used and data is scaled by row
