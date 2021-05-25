@@ -1,3 +1,40 @@
+---
+title: "How to deal with function redundancy?"
+author: Suggestions to techteam.metalab@gmail.com
+date: Report generated @`r Sys.time()`
+always_allow_html: TRUE
+output:
+  html_document:
+    fig_width: 10
+    fig_caption: TRUE
+    toc: TRUE
+    toc_depth: 4
+    toc_float:
+      collapsed: TRUE
+      smooth_scroll: TRUE
+    number_sections: TRUE
+  pdf_document:
+    toc: true
+    toc_depth: 4
+    highlight: tango
+    df_print: kable
+    number_sections: TRUE
+  word_document:
+    toc: true
+    toc_depth: 4
+    highlight: tango
+    df_print: kable
+    smart: TRUE
+---
+
+<style type="text/css">
+.main-container {
+  max-width: 1400px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
 
 
 # Question:
@@ -45,7 +82,7 @@ avaliable functions are:
 "eggNOG_description"
 
 
-## Prepare data
+# Prepare data
 
 functions.csv can be found [here](./functions.csv):
 
@@ -120,6 +157,7 @@ func_compare_intensity_plot <- func_compare_intensity %>%
   as.matrix()
 
 ```
+
 ```{r}
 # plot heatmap without  column clustering
 gplots::heatmap.2(func_compare_intensity_plot, scale = "row",Colv = FALSE, dendrogram  = "row", trace  = "none")
@@ -129,7 +167,7 @@ pheatmap::pheatmap(func_compare_intensity_plot,scale = "row", cluster_cols = FAL
 ```
 
 
-## Profile of the flatten only
+# Profile of the flatten only
 
 
 ```{r message =FALSE}
@@ -159,7 +197,7 @@ pheatmap::pheatmap(df_func_intensity_falltern_only, cluster_cols = FALSE)
 
 ```
 
-## see Abundance Correlation between flatten and first
+# see Abundance Correlation between "flatten" and "first" workflow
 
 ```{r message=FALSE}
 # melt the aggretated matrix with intensity values
@@ -242,7 +280,7 @@ dev.off()
 
 ```
 
-## sessionInfo
+# sessionInfo
 ```{r}
 sessionInfo()
 ```
