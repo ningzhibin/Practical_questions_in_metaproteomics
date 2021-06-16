@@ -63,11 +63,11 @@ Both umap and uwot are availabe at CRAN, and will be used here.
 
 * test TMT data can be downloaded from here:
 
-[meta.txt](IRI_MQ/meta.txt)
+[meta.txt](./IRI_MQ/meta.txt)
 
-[proteinGroups.txt](IRI_MQ/peptides_report.txt)
+[proteinGroups.txt](./IRI_MQ/peptides_report.txt)
 
-[peptide.txt](IRI_MQ/proteinGroups_report.txt)
+[peptide.txt](./IRI_MQ/proteinGroups_report.txt)
 
 
 ```{r eval=FALSE}
