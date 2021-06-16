@@ -2,3 +2,5 @@
 
 * [how to deal with function redundancy](./how_to_deal_with_function_redundancy.html)
  
+* [umap vs PCA](umap_dimention_reduction_demo.html)
+ 

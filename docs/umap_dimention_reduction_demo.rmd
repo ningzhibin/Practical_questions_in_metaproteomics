@@ -1,0 +1,456 @@
+---
+title: "UMAP VS PCA"
+author: Suggestions to ningzhibin@gmail.com
+date: Report generated @`r Sys.time()`
+always_allow_html: TRUE
+output:
+  html_document:
+    code_folding: show
+    fig_width: 8
+    fig_caption: TRUE
+    toc: TRUE
+    toc_depth: 4
+    toc_float:
+      collapsed: TRUE
+      smooth_scroll: TRUE
+    number_sections: TRUE
+  pdf_document:
+    toc: true
+    toc_depth: 4
+    highlight: tango
+    df_print: kable
+    number_sections: TRUE
+  word_document:
+    toc: true
+    toc_depth: 4
+    highlight: tango
+    df_print: kable
+    smart: TRUE
+---
+
+```{=html}
+<style type="text/css">
+.main-container {
+  max-width: 1400px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+```
+# Abstract
+
+Here we mainly show how to perform umap in R with proteomics/TMT data and some comparisons between PCA and umap, as well as some tweaks of the parameters.
+
+# What is umap
+
+
+Uniform Manifold Approximation and Projection (UMAP) is an newly developed algorithm for dimensional reduction. UMAP is good for large scale data, as well as traditional small dataset. More and more publications have used umap to replace PCA. Generally umap performs better than PCA.
+
+[reference1](https://cran.r-project.org/web/packages/umap/vignettes/umap.html)
+
+
+There are 3 r packages for UMAP umap and uwot, umapr
+
+-   [umapr]() needs python. developed in 2018, discontinued and archived on github.
+-   [umap](hhttps://github.com/ropensci-archive/umaprttps://cran.r-project.org/web/packages/umap/index.html) has two integrated function, one is python, but the default is r, no python needed. For more usage and details, check the [vignettes](https://cran.r-project.org/web/packages/umap/vignettes/umap.html). Easy to use.
+-   [uwot](https://github.com/jlmelville/uwot) is still actively maintained. the author is co-author fo the second version of the umap publication. it is a full implementation of the python version in R.
+
+# Preparation
+
+umapr is not supported and not used here.
+
+Both umap and uwot are availabe at CRAN, and will be used here.
+
+* test TMT data can be downloaded from here:
+
+[meta.txt](IRI_MQ/meta.txt)
+
+[proteinGroups.txt](IRI_MQ/peptides_report.txt)
+
+[peptide.txt](IRI_MQ/proteinGroups_report.txt)
+
+
+```{r eval=FALSE}
+## install the two package, only run for the first time
+install.packages("umap")
+install.packages("uwot")
+
+```
+
+```{r message=FALSE, warning=FALSE}
+library(umap)
+library(uwot)
+library(ggpubr)
+library(tidyverse)
+
+```
+
+# iris data test
+
+## input format
+
+First thing first, the data matrix is supposed to be a wide table instead of long table, which means that features are columns, samples are rows. The usual protein/peptide tables needs to be transposed before analysis
+
+## parameter
+
+All using default for fair comparison
+
+
+## PCA
+
+```{r}
+pca_iris <- stats::prcomp(iris[, -5], retx = TRUE, rank. = 2)
+
+df <- data.frame(pca_iris$x, Species = iris$Species)
+plotly::ggplotly(ggpubr::ggscatter(df, x = "PC1", y = "PC2", color = "Species") %>%  ggpubr::ggpar(legend = "right", title = "PCA of iris"))
+
+
+```
+
+## using umap::umap
+
+**NOTE!** the result is in $layout
+
+```{r}
+iris.umap <- umap::umap(iris[, -5])
+
+df <- data.frame(iris.umap$layout, Species = iris$Species)
+plotly::ggplotly(ggpubr::ggscatter(df, x = "X1", y = "X2", color = "Species") %>%  ggpubr::ggpar(legend = "right", title = "umap::umap of iris"))
+
+
+```
+
+## using uwot::umap
+
+value is a matrix of optimized coordinates
+
+```{r}
+
+iris_uwot_umap <- uwot::umap(iris[, -5])
+df <- data.frame(iris_uwot_umap, Species = iris$Species)
+plotly::ggplotly(ggpubr::ggscatter(df, x = "X1", y = "X2", color = "Species") %>%  ggpubr::ggpar(legend = "right", title = "umap::umap of iris"))
+
+
+```
+
+
+
+# TMT result from Maxquant
+
+## protein level
+
+```{r}
+meta <- rio::import("IRI_MQ/meta.txt")
+
+MQ_IRI <- rio::import("IRI_MQ/proteinGroups_report.txt")
+MQ_IRI <- t(MQ_IRI[,grep("Intensity ",colnames(MQ_IRI))])
+
+# check the meta format
+knitr::kable(head(meta))
+```
+
+### using raw intensity
+
+#### PCA
+
+```{r message=FALSE}
+
+pca <- stats::prcomp(MQ_IRI, retx = TRUE, rank. = 2, center = FALSE)
+
+df_pca <- data.frame(pca$x, meta)
+plotly::ggplotly(ggpubr::ggscatter(df_pca, x = "PC1", y = "PC2", color = "plate_row") %>%  ggpubr::ggpar(legend = "right", title = "PCA (raw intensity)"))
+
+```
+
+#### umap::umap
+```{r message=FALSE}
+
+umap <- umap:::umap(MQ_IRI)
+df_umap <- data.frame(umap$layout, meta)
+ggpubr::ggscatter(df_umap, x = "X1", y = "X2", color = "plate_row") %>%  ggpubr::ggpar(legend = "right", title = "UMAP (raw intensity)")
+
+```
+
+#### uwot:umap
+
+```{r message=FALSE}
+uwot_umap <- uwot::umap(MQ_IRI)
+df_uwot_umap <- data.frame(uwot_umap,  meta)
+plotly::ggplotly(ggpubr::ggscatter(df_uwot_umap, x = "X1", y = "X2", color = "plate_row") %>%  ggpubr::ggpar(legend = "right", title = "UWOT::UMAP (raw intensity)"))
+
+```
+
+### using log10(intensity)
+```{r}
+MQ_IRI <- log10(MQ_IRI+1)
+
+```
+#### PCA
+
+```{r message=FALSE}
+
+pca <- stats::prcomp(MQ_IRI, retx = TRUE, rank. = 2, center = FALSE)
+
+df_pca <- data.frame(pca$x, meta)
+plotly::ggplotly(ggpubr::ggscatter(df_pca, x = "PC1", y = "PC2", color = "plate_row") %>%  ggpubr::ggpar(legend = "right", title = "PCA (log10 raw intensity)"))
+
+```
+
+#### umap::umap
+```{r message=FALSE}
+
+umap <- umap:::umap(MQ_IRI)
+df_umap <- data.frame(umap$layout, meta)
+ggpubr::ggscatter(df_umap, x = "X1", y = "X2", color = "plate_row") %>%  ggpubr::ggpar(legend = "right", title = "UMAP (log10 raw intensity)")
+
+```
+
+#### uwot:umap
+
+```{r message=FALSE}
+uwot_umap <- uwot::umap(MQ_IRI)
+df_uwot_umap <- data.frame(uwot_umap,  meta)
+plotly::ggplotly(ggpubr::ggscatter(df_uwot_umap, x = "X1", y = "X2", color = "plate_row") %>%  ggpubr::ggpar(legend = "right", title = "UWOT::UMAP (log10 raw intensity)"))
+
+```
+
+
+## peptide level
+
+```{r}
+MQ_IRI <- rio::import("IRI_MQ/peptides_report.txt")
+MQ_IRI <- t(MQ_IRI[,grep("Intensity ",colnames(MQ_IRI))])
+
+```
+
+### using raw intensity
+
+#### PCA
+
+```{r message=FALSE}
+
+pca <- stats::prcomp(MQ_IRI, retx = TRUE, rank. = 2, center = FALSE)
+
+df_pca <- data.frame(pca$x, meta)
+plotly::ggplotly(ggpubr::ggscatter(df_pca, x = "PC1", y = "PC2", color = "plate_row") %>%  ggpubr::ggpar(legend = "right", title = "PCA (raw intensity)"))
+
+```
+
+#### umap::umap
+```{r message=FALSE}
+
+umap <- umap:::umap(MQ_IRI)
+df_umap <- data.frame(umap$layout, meta)
+ggpubr::ggscatter(df_umap, x = "X1", y = "X2", color = "plate_row") %>%  ggpubr::ggpar(legend = "right", title = "UMAP (raw intensity)")
+
+```
+
+#### uwot:umap
+
+```{r message=FALSE}
+uwot_umap <- uwot::umap(MQ_IRI)
+df_uwot_umap <- data.frame(uwot_umap,  meta)
+plotly::ggplotly(ggpubr::ggscatter(df_uwot_umap, x = "X1", y = "X2", color = "plate_row") %>%  ggpubr::ggpar(legend = "right", title = "UWOT::UMAP (raw intensity)"))
+
+```
+
+### using log10(intensity)
+```{r}
+MQ_IRI <- log10(MQ_IRI+1)
+
+```
+#### PCA
+
+```{r message=FALSE}
+
+pca <- stats::prcomp(MQ_IRI, retx = TRUE, rank. = 2, center = FALSE)
+
+df_pca <- data.frame(pca$x, meta)
+plotly::ggplotly(ggpubr::ggscatter(df_pca, x = "PC1", y = "PC2", color = "plate_row") %>%  ggpubr::ggpar(legend = "right", title = "PCA (log10 raw intensity)"))
+
+```
+
+#### umap::umap
+```{r message=FALSE}
+
+umap <- umap:::umap(MQ_IRI)
+df_umap <- data.frame(umap$layout, meta)
+ggpubr::ggscatter(df_umap, x = "X1", y = "X2", color = "plate_row") %>%  ggpubr::ggpar(legend = "right", title = "UMAP (log10 raw intensity)")
+
+```
+
+#### uwot:umap
+
+```{r message=FALSE}
+uwot_umap <- uwot::umap(MQ_IRI)
+df_uwot_umap <- data.frame(uwot_umap,  meta)
+plotly::ggplotly(ggpubr::ggscatter(df_uwot_umap, x = "X1", y = "X2", color = "plate_row") %>%  ggpubr::ggpar(legend = "right", title = "UWOT::UMAP (log10 raw intensity)"))
+
+```
+
+
+# PCA tweak
+
+some parameters of PCA are worth to tweak, like center and scale.
+we use the log10 peptide intensity data for test,
+as we can see that scale does kind of centering, therefore at least one set as true will help the separation
+
+Remeber to remove all 0 features first, otherwise not able to do scale
+
+
+```{r fig.height = 8, fig.width=10, class.source = 'fold-hide'}
+
+MQ_IRI <- rio::import("IRI_MQ/peptides_report.txt")
+MQ_IRI <- MQ_IRI %>% select(starts_with("Intensity ")) %>% t() %>% as.data.frame() %>% select(where(~ sum(.) != 0))
+MQ_IRI <- log10(MQ_IRI+1)
+
+pca <- stats::prcomp(MQ_IRI, retx = TRUE, center = FALSE, scale = FALSE)
+df_pca <- data.frame(pca$x, meta)
+p1 <- ggpubr::ggscatter(df_pca, x = "PC1", y = "PC2", color = "plate_row") %>%  ggpubr::ggpar(legend = "none", title = "center:FALSE  scale:FALSE")
+
+pca <- stats::prcomp(MQ_IRI, retx = TRUE, center = TRUE, scale = FALSE)
+df_pca <- data.frame(pca$x, meta)
+p2 <- ggpubr::ggscatter(df_pca, x = "PC1", y = "PC2", color = "plate_row") %>%  ggpubr::ggpar(legend = "none", title = "center:TRUE  scale:FALSE")
+
+pca <- stats::prcomp(MQ_IRI, retx = TRUE, center = FALSE, scale = TRUE)
+df_pca <- data.frame(pca$x, meta)
+p3 <- ggpubr::ggscatter(df_pca, x = "PC1", y = "PC2", color = "plate_row") %>%  ggpubr::ggpar(legend = "none", title = "center:FLASE  scale:TRUE")
+
+pca <- stats::prcomp(MQ_IRI, retx = TRUE, center = TRUE, scale = TRUE)
+df_pca <- data.frame(pca$x, meta)
+p4<- ggpubr::ggscatter(df_pca, x = "PC1", y = "PC2", color = "plate_row") %>%  ggpubr::ggpar(legend = "none", title = "center:TRUE  scale:TRUE")
+
+
+ggarrange(p1, p2, p3,p4, ncol = 2, nrow = 2)
+
+
+
+```
+
+
+# uwot::umap tweak
+
+Deliberately we choose a raw protein intensity which performs worst from the above check for the test.
+
+There are lots of parameters to modulate
+
+umap can also be used ina supervised way by defining y
+
+
+## neighbour
+
+setup n_neighbors
+
+```{r echo = TRUE,fig.width = 10, fig.height= 12, class.source = 'fold-hide'}
+MQ_IRI <- rio::import("IRI_MQ/proteinGroups_report.txt")
+MQ_IRI <- MQ_IRI %>% select(starts_with("Intensity ")) %>% t() %>% as.data.frame() %>% select(where(~ sum(.) != 0))
+#MQ_IRI <- log10(MQ_IRI+1)
+
+
+uwot_umap <- uwot::umap(MQ_IRI,n_neighbors = 5)
+df_uwot_umap <- data.frame(uwot_umap,  meta)
+p1 <-ggpubr::ggscatter(df_uwot_umap, x = "X1", y = "X2", color = "plate_row") %>%  ggpubr::ggpar(legend = "none", title = "neighbors = 5")
+
+uwot_umap <- uwot::umap(MQ_IRI,n_neighbors = 10)
+df_uwot_umap <- data.frame(uwot_umap,  meta)
+p2 <-ggpubr::ggscatter(df_uwot_umap, x = "X1", y = "X2", color = "plate_row") %>%  ggpubr::ggpar(legend = "none", title = "neighbors = 10")
+
+
+uwot_umap <- uwot::umap(MQ_IRI,n_neighbors = 15)
+df_uwot_umap <- data.frame(uwot_umap,  meta)
+p3 <-ggpubr::ggscatter(df_uwot_umap, x = "X1", y = "X2", color = "plate_row") %>%  ggpubr::ggpar(legend = "none", title = "neighbors = 15 (default)")
+
+uwot_umap <- uwot::umap(MQ_IRI,n_neighbors = 20)
+df_uwot_umap <- data.frame(uwot_umap,  meta)
+p4 <-ggpubr::ggscatter(df_uwot_umap, x = "X1", y = "X2", color = "plate_row") %>%  ggpubr::ggpar(legend = "none", title = "neighbors = 20")
+
+
+uwot_umap <- uwot::umap(MQ_IRI,n_neighbors = 40)
+df_uwot_umap <- data.frame(uwot_umap,  meta)
+p5 <-ggpubr::ggscatter(df_uwot_umap, x = "X1", y = "X2", color = "plate_row") %>%  ggpubr::ggpar(legend = "none", title = "neighbors = 40")
+
+uwot_umap <- uwot::umap(MQ_IRI,n_neighbors = 60)
+df_uwot_umap <- data.frame(uwot_umap,  meta)
+p6 <-ggpubr::ggscatter(df_uwot_umap, x = "X1", y = "X2", color = "plate_row") %>%  ggpubr::ggpar(legend = "none", title = "neighbors = 60")
+
+ggarrange(p1, p2, p3,p4,p5,p6, ncol = 2, nrow = 3)
+
+
+```
+
+## metric
+
+```{r echo = TRUE,fig.width = 10, fig.height= 12, class.source = 'fold-hide'}
+
+uwot_umap <- uwot::umap(MQ_IRI,metric = "euclidean")
+df_uwot_umap <- data.frame(uwot_umap,  meta)
+p1 <-ggpubr::ggscatter(df_uwot_umap, x = "X1", y = "X2", color = "plate_row") %>%  ggpubr::ggpar(legend = "none", title = "metric: euclidean(default)")
+
+uwot_umap <- uwot::umap(MQ_IRI,metric = "cosine")
+df_uwot_umap <- data.frame(uwot_umap,  meta)
+p2 <-ggpubr::ggscatter(df_uwot_umap, x = "X1", y = "X2", color = "plate_row") %>%  ggpubr::ggpar(legend = "none", title = "metric: cosine")
+
+
+uwot_umap <- uwot::umap(MQ_IRI,metric = "manhattan")
+df_uwot_umap <- data.frame(uwot_umap,  meta)
+p3 <-ggpubr::ggscatter(df_uwot_umap, x = "X1", y = "X2", color = "plate_row") %>%  ggpubr::ggpar(legend = "none", title = "metric: manhattan")
+
+uwot_umap <- uwot::umap(MQ_IRI,metric = "hamming")
+df_uwot_umap <- data.frame(uwot_umap,  meta)
+p4 <-ggpubr::ggscatter(df_uwot_umap, x = "X1", y = "X2", color = "plate_row") %>%  ggpubr::ggpar(legend = "none", title = "metric: hamming")
+
+
+uwot_umap <- uwot::umap(MQ_IRI,metric = "correlation")
+df_uwot_umap <- data.frame(uwot_umap,  meta)
+p5 <-ggpubr::ggscatter(df_uwot_umap, x = "X1", y = "X2", color = "plate_row") %>%  ggpubr::ggpar(legend = "none", title = "metric: correlation")
+
+
+ggarrange(p1, p2, p3,p4,p5, ncol = 2, nrow = 3)
+
+```
+
+# init
+
+```{r echo = TRUE,fig.width = 10, fig.height= 16, class.source = 'fold-hide'}
+
+uwot_umap <- uwot::umap(MQ_IRI,init	= "spectral")
+df_uwot_umap <- data.frame(uwot_umap,  meta)
+p1 <-ggpubr::ggscatter(df_uwot_umap, x = "X1", y = "X2", color = "plate_row") %>%  ggpubr::ggpar(legend = "none", title = "init: spectral(default)")
+
+uwot_umap <- uwot::umap(MQ_IRI,init = "normlaplacian")
+df_uwot_umap <- data.frame(uwot_umap,  meta)
+p2 <-ggpubr::ggscatter(df_uwot_umap, x = "X1", y = "X2", color = "plate_row") %>%  ggpubr::ggpar(legend = "none", title = "init: normlaplacian")
+
+
+uwot_umap <- uwot::umap(MQ_IRI,init = "random")
+df_uwot_umap <- data.frame(uwot_umap,  meta)
+p3 <-ggpubr::ggscatter(df_uwot_umap, x = "X1", y = "X2", color = "plate_row") %>%  ggpubr::ggpar(legend = "none", title = "init: random")
+
+uwot_umap <- uwot::umap(MQ_IRI,init = "laplacian")
+df_uwot_umap <- data.frame(uwot_umap,  meta)
+p4 <-ggpubr::ggscatter(df_uwot_umap, x = "X1", y = "X2", color = "plate_row") %>%  ggpubr::ggpar(legend = "none", title = "init: laplacian")
+
+
+uwot_umap <- uwot::umap(MQ_IRI,init = "pca")
+df_uwot_umap <- data.frame(uwot_umap,  meta)
+p5 <-ggpubr::ggscatter(df_uwot_umap, x = "X1", y = "X2", color = "plate_row") %>%  ggpubr::ggpar(legend = "none", title = "init: pca")
+
+uwot_umap <- uwot::umap(MQ_IRI,init = "spca")
+df_uwot_umap <- data.frame(uwot_umap,  meta)
+p6 <-ggpubr::ggscatter(df_uwot_umap, x = "X1", y = "X2", color = "plate_row") %>%  ggpubr::ggpar(legend = "none", title = "init: spca")
+
+
+uwot_umap <- uwot::umap(MQ_IRI,init = "agspectral")
+df_uwot_umap <- data.frame(uwot_umap,  meta)
+p7 <-ggpubr::ggscatter(df_uwot_umap, x = "X1", y = "X2", color = "plate_row") %>%  ggpubr::ggpar(legend = "none", title = "init: agspectral")
+
+ggarrange(p1, p2, p3,p4,p5,p6,p7, ncol = 2, nrow = 4)
+
+```
+
+
+# sessionInfo
+
+```{r}
+sessionInfo()
+```

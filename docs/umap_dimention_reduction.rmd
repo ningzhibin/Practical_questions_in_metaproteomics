@@ -1,0 +1,198 @@
+---
+title: "How to deal with function redundancy?"
+author: Suggestions to techteam.metalab@gmail.com
+date: Report generated @`r Sys.time()`
+always_allow_html: TRUE
+output:
+  html_document:
+    fig_width: 10
+    fig_caption: TRUE
+    toc: TRUE
+    toc_depth: 4
+    toc_float:
+      collapsed: TRUE
+      smooth_scroll: TRUE
+    number_sections: TRUE
+  pdf_document:
+    toc: true
+    toc_depth: 4
+    highlight: tango
+    df_print: kable
+    number_sections: TRUE
+  word_document:
+    toc: true
+    toc_depth: 4
+    highlight: tango
+    df_print: kable
+    smart: TRUE
+---
+
+<style type="text/css">
+.main-container {
+  max-width: 1400px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+# what is umap
+
+[reference1](https://cran.r-project.org/web/packages/umap/vignettes/umap.html)
+
+Uniform Manifold Approximation and Projection (UMAP) is an relatively newly developed algorithm for dimensional reduction. 
+UMAP is good for large scale data, as well as traditional small dataset
+
+there are 3 r packages for UMAP
+umap and uwot, umapr
+
+* [umapr](https://github.com/ropensci-archive/umapr) needs python. developed in 2018, discontinued and archived on github.
+* [umap](https://cran.r-project.org/web/packages/umap/index.html) has two integrated function, one is python, but the default is r, no python needed. For more usage and details, check the [vignettes](https://cran.r-project.org/web/packages/umap/vignettes/umap.html). Easy to use. 
+* [uwot](https://github.com/jlmelville/uwot) is still actively maintained. the author is co-author fo the second version of the umap publication.  it is a full implementation of the python version. 
+
+
+
+## install the two package first
+
+install.packages("umap")
+install.packages("uwot")
+
+```{r}
+# prepare
+
+library(vizier)
+library(umap)
+library(uwot)
+library(ggpubr)
+library(tidyverse)
+
+```
+
+
+# PCA of iris
+
+
+```{r}
+
+# PCA analysis
+pca_iris <- stats::prcomp(iris[, -5], retx = TRUE, rank. = 2)
+
+vizier::embed_plotly(pca_iris$x, iris$Species)
+# df <- data.frame(pca_iris$x, Species = iris$Species)
+# ggpubr::ggscatter(df, x = "PC1", y = "PC2", color = "Species") %>%  ggpubr::ggpar(legend = "right")
+
+
+```
+
+
+
+# using uwap::umap
+
+
+```{r}
+iris.data = iris[, grep("Sepal|Petal", colnames(iris))]
+
+iris.umap = umap(iris.data)
+
+
+vizier::embed_plotly(iris.umap$layout, iris$Species)
+df <- data.frame(iris.umap$layout, Species = iris$Species)
+ggpubr::ggscatter(df, x = "X1", y = "X2", color = "Species") %>%  ggpubr::ggpar(legend = "right")
+
+
+
+```
+
+
+
+# using uwot::umap
+
+value is a matrix of optimized coordinates
+
+```{r}
+library(uwot)
+
+
+# Non-numeric columns are ignored, so in a lot of cases you can pass a data
+# frame directly to umap
+iris_umap <- uwot::umap(iris, n_neighbors = 50, learning_rate = 0.5, init = "random")
+vizier::embed_plotly(iris_umap, iris$Species)
+
+
+```
+
+
+
+
+
+
+
+```{r}
+
+# Load mnist from somewhere, e.g.
+# devtools::install_github("jlmelville/snedata")
+# mnist <- snedata::download_mnist()
+mnist_umap <- umap(mnist, n_neighbors = 15, min_dist = 0.001, verbose = TRUE)
+
+# For high dimensional datasets (> 100-1000 columns) using PCA to reduce
+# dimensionality is highly recommended to avoid the nearest neighbor search
+# taking a long time. Keeping only 50 dimensions can speed up calculations
+# without affecting the visualization much
+mnist_umap <- umap(mnist, pca = 50)
+
+# Use a specific number of threads
+mnist_umap <- umap(mnist, n_neighbors = 15, min_dist = 0.001, verbose = TRUE, n_threads = 8)
+
+# Use a different metric
+mnist_umap_cosine <- umap(mnist, n_neighbors = 15, metric = "cosine", min_dist = 0.001, verbose = TRUE, n_threads = 8)
+
+# If you are only interested in visualization, `fast_sgd = TRUE` gives a much faster optimization
+mnist_umap_fast_sgd <- umap(mnist, n_neighbors = 15, metric = "cosine", min_dist = 0.001, verbose = TRUE, fast_sgd = TRUE)
+
+# Supervised dimension reduction
+mnist_umap_s <- umap(mnist, n_neighbors = 15, min_dist = 0.001, verbose = TRUE, n_threads = 8,
+                     y = mnist$Label, target_weight = 0.5)
+
+# Add new points to an existing embedding
+mnist_train <- head(mnist, 60000)
+mnist_test <- tail(mnist, 10000)
+
+# You must set ret_model = TRUE to return extra data we need
+# coordinates are in mnist_train_umap$embedding
+mnist_train_umap <- umap(mnist_train, verbose = TRUE, ret_model = TRUE)
+mnist_test_umap <- umap_transform(mnist_test, mnist_train_umap, verbose = TRUE)
+
+# Save the nearest neighbor data
+mnist_nn <- umap(mnist, ret_nn = TRUE)
+# coordinates are now in mnist_nn$embedding
+
+# Re-use the nearest neighor data and save a lot of time
+mnist_nn_spca <- umap(mnist, nn_method = mnist_nn$nn, init = spca)
+
+# No problem to have ret_nn = TRUE and ret_model = TRUE at the same time
+# Or just use the ret_extra parameter:
+mnist_nn_and_model <- umap(mnist, ret_extra = c("model", "nn"))
+
+# You can also get to the input fuzzy graph as a sparse matrix via "fgraph"
+mnist_with_fgraph <- umap(mnist, ret_extra = c("fgraph"))
+# equivalent for lvish is to use "P" (input probability matrix):
+mnist_with_P <- lvish(mnist, ret_extra = c("P"))
+
+# Calculate Petal and Sepal neighbors separately (uses intersection of the resulting sets):
+iris_umap <- umap(iris, metric = list("euclidean" = c("Sepal.Length", "Sepal.Width"),
+                                      "euclidean" = c("Petal.Length", "Petal.Width")))
+# Can also use individual factor columns
+iris_umap <- umap(iris, metric = list("euclidean" = c("Sepal.Length", "Sepal.Width"),
+                                      "euclidean" = c("Petal.Length", "Petal.Width"),
+                                      "categorical" = "Species"))
+```
+
+
+
+
+
+
+# sessionInfo
+```{r}
+sessionInfo()
+```
+
