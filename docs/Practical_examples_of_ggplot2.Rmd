@@ -1,0 +1,96 @@
+---
+title: "Practical Examples of ggplot2 in Metaproteomics"
+author: Suggestions to ningzhibin@gmail.com
+date: Report generated @`r Sys.time()`
+always_allow_html: TRUE
+output:
+  html_document:
+    code_folding: show
+    fig_width: 8
+    fig_caption: TRUE
+    toc: TRUE
+    toc_depth: 4
+    toc_float:
+      collapsed: TRUE
+      smooth_scroll: TRUE
+    number_sections: TRUE
+  pdf_document:
+    toc: true
+    toc_depth: 4
+    highlight: tango
+    df_print: kable
+    number_sections: TRUE
+  word_document:
+    toc: true
+    toc_depth: 4
+    highlight: tango
+    df_print: kable
+    smart: TRUE
+---
+
+```{=html}
+<style type="text/css">
+.main-container {
+  max-width: 1400px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+```
+
+# using geom_tile to plot the 2D ms data
+
+
+
+```{r message=FALSE, warning=FALSE}
+
+library(ggplot2)
+library(tidyverse)
+data <- rio::import("feature_data.csv")
+
+head(data)
+
+
+```
+
+Any scatter plot function can visualize the 2d MS data easily, but not able to change the wide and height of the point. 
+geom_tile has some hidden parameters to deal with that. The data mapping is 
+
+Here we use a real feature data to demo. 
+
+
+```{r message=FALSE, warning=FALSE}
+
+plot(data[,c(2,3)], pch = 16, cex = 0.2)
+
+```
+
+With ggplot2(ggtile), it is easy to map the intensity into the color, with NA values set to grey
+
+In ggtile, there are two hidden paras, height and width, most of the time, default settings will be good enough. However, if too many points or two few distant points, they will not/hardly visible
+
+```{r message=FALSE, warning=FALSE}
+data_small <- data.frame(X =sample(1:30,20), Y = sample(500:600,20), Z = sample(1:100000,100))
+ggplot(data_small, aes(X, Y, fill= Z)) +geom_tile()
+
+data_small <- data.frame(X =sample(1:3000,100), Y = sample(400:1600,100), Z = sample(1:100000,100))
+ggplot(data_small, aes(X, Y, fill= Z)) +geom_tile()
+
+```
+
+Therefore, the hight and width needs to be properly set for complicated data. 
+
+```{r message=FALSE, warning=FALSE}
+ ggplot(data, aes(RT, MZ, fill= HM406CO)) +geom_tile(height = 10, width = 10)
+
+```
+
+```{r message=FALSE, warning=FALSE}
+ ggplot(data, aes(RT, MZ, fill= HM406CO)) +geom_tile(height = 20, width = 50)
+
+```
+
+
+
+
+

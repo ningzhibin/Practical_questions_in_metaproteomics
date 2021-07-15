@@ -1,0 +1,281 @@
+---
+title: "How many replicates needed"
+author: Suggestions to ningzhibin@gmail.com
+date: Report generated @`r Sys.time()`
+always_allow_html: TRUE
+output:
+  html_document:
+    code_folding: show
+    fig_width: 8
+    fig_caption: TRUE
+    toc: TRUE
+    toc_depth: 4
+    toc_float:
+      collapsed: TRUE
+      smooth_scroll: TRUE
+    number_sections: TRUE
+  pdf_document:
+    toc: true
+    toc_depth: 4
+    highlight: tango
+    df_print: kable
+    number_sections: TRUE
+  word_document:
+    toc: true
+    toc_depth: 4
+    highlight: tango
+    df_print: kable
+    smart: TRUE
+---
+
+```{=html}
+<style type="text/css">
+.main-container {
+  max-width: 1400px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+```
+# Abstract
+
+It is a frequently asked question that how many 
+
+Readers can use this function to see effects of some other parameters on the number of replicates with different change (mean difference)  
+
+
+# Simulation function
+
+Idea:
+
+* Simulate the proteomics result from a two-samples experiment with defined number of replicates. 
+* Most of the proteins/peptides will be nonchangeing backgroud, sampled from a large normal distributed pool.
+* A fraction of the proteins/peptides are significantly changed between the two samples, with defined meand difference. 
+* with SD set 1, it is easy to estimate the difference between control and sample
+
+
+
+Default parameters:
+
+* pool_sample_size = 100000  # the size of background pool, be bigger the better, but  the slower
+
+* mean_difference  = 3 # the difference between control and sample, with SD set 1, the mean of difference can be used to interpretate the amplitude of the change, 1 is the same as to sd, while 2 means 2 folds of sd.
+
+* sd = 1 #the sd of the sample, leave it as default, unless you know what you are doing
+
+* number_features_nochange = 1000 # as name says, the number of background, no change 
+
+* number_features_changed = 200 # the number of changed features
+
+* number_of_replicate = 20 # number of replicate in the experiment, 20 should be good enough for most simulation to see the plateu
+
+* number_of_permutation = 20 # number of permutation to see the mean and sd of the simulation
+
+
+
+```{r  message=FALSE, warning=FALSE,class.source = 'fold-hide'}
+
+library(ggplot2)
+library(reshape2)
+library(tidyverse)
+
+simulation_function<- function(pool_sample_size = 100000,
+                    mean_difference  = 3,
+                    sd = 1,
+                    number_features_nochange = 1000,
+                    number_features_changed = 200,
+                    number_of_replicate = 20,
+                    number_of_permutation = 20){
+  
+  
+  # initialize
+  summary_list <- list()
+  
+  for(n_rep in 2: number_of_replicate){
+    #print(paste("analyzing experiment with replicate number:", n_rep))
+    p_value_list <- list()
+    q_value_list <- list()
+    
+    for(perm in 1:number_of_permutation){
+      
+      # generate sampling data
+      pool_normal_1 <- rnorm(pool_sample_size, mean = 0, sd =sd)
+      pool_normal_2 <- rnorm(pool_sample_size, mean = mean_difference, sd =sd)
+      
+      
+      # background_ctrl, from pool_normal_1
+      matrix_background_control <- matrix(sample(pool_normal_1, n_rep* number_features_nochange, replace = TRUE), ncol =  n_rep)
+      colnames(matrix_background_control) <- paste0(rep("ctr_rep", n_rep), 1:n_rep)
+      
+      # background_sample from pool_normal_1
+      matrix_background_sample <- matrix(sample(pool_normal_1, n_rep* number_features_nochange, replace = TRUE), ncol =  n_rep)
+      colnames(matrix_background_sample) <- paste0(rep("sample_rep", n_rep), 1:n_rep)
+      
+      
+      
+      # control
+      matrix_control <- matrix(sample(pool_normal_1, n_rep* number_features_changed, replace = TRUE), ncol =  n_rep)
+      colnames(matrix_control) <- paste0(rep("ctr_rep", n_rep), 1:n_rep)
+      
+      matrix_control <- rbind(matrix_control, matrix_background_control)
+      
+      # sample
+      matrix_sample <- matrix(sample(pool_normal_2, n_rep* number_features_changed, replace = TRUE), ncol =  n_rep)
+      colnames(matrix_sample) <- paste0(rep("sample_rep", n_rep), 1:n_rep)
+      
+      matrix_sample <- rbind(matrix_sample, matrix_background_sample)
+      
+      
+      # combine into one matrix
+      sample_combined <- cbind(matrix_control, matrix_sample)
+      #sample_compare_df <- data.frame(control, sample)
+      #sample_compare_df_melt <- melt(sample_compare_df)
+      
+      p_value <- apply(sample_combined,1,function(x) t.test(x[1:n_rep],x[1:n_rep + n_rep])$p.value)
+      q_value <- p.adjust(p_value, "fdr")
+      
+      
+      p_value_list[[perm]] <- p_value
+      q_value_list[[perm]] <- q_value
+      
+    }
+    
+    
+    # format the pvalue and qvalue into data.frame and melt
+    p_value_combined <- data.frame(p_value_list)
+    names(p_value_combined) <- paste0( "perm", 1:perm)
+    q_value_combined <- data.frame(q_value_list)
+    names(q_value_combined) <- paste0( "perm", 1:perm)
+    
+    # summary the number of qualified pvalue 
+    pvalue_qualified <- unlist(lapply(p_value_list, function(x) {length(which(x < 0.05))}))
+    qvalue_qualified <- unlist(lapply(q_value_list, function(x) {length(which(x < 0.05))}))
+    summary <- data.frame(pvalue_qualified,qvalue_qualified)
+    row.names(summary) <- paste0( "perm", 1:perm)
+    
+    
+    # store in the list and return
+    summary_list[[paste0("rep", n_rep)]] <- summary
+    
+  }
+  
+  
+  
+  data_plot_allperm <- summary_list %>% 
+    as.data.frame() %>% 
+    rownames_to_column() %>% 
+    melt() %>% 
+    separate(variable, c("rep", "method"),sep = "\\.") %>% 
+    mutate(rep = as.factor(rep), rep = factor(rep, levels =paste0("rep", 2:number_of_replicate), labels = 2:number_of_replicate)) %>% 
+    group_by(rep, method) %>% 
+    summarise(mean = mean(value), sd = sd(value)) 
+  
+  
+  
+  p<- ggplot(data_plot_allperm, aes(x=rep, y=mean, group=method, color = method)) + 
+    geom_line() +
+    geom_point(stat="identity")+
+    geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd), width=.2, position=position_dodge(0.05))+
+    ggtitle("How Many Replicates do We Need?") + ylab("Number of Significantly changed features identified")+ xlab("Number of Replicates Performed")+
+    annotate("text", x = c(13,13, 13, 13, 13), y = c(40, 30, 20, 10, 0), label = c(paste0("Mean difference: ",mean_difference), 
+                                                                                   paste0("SD: ", sd),
+                                                                                   paste0("Number of significantly changed features: ",number_features_changed),
+                                                                                   paste0("Number of not changed features: ", number_features_nochange),
+                                                                                   paste0("Number of permutations: ", number_of_permutation)
+    ))
+  
+  
+  return((p))
+  
+}
+
+```
+
+# Simluation 1: 200 out of 1000
+
+
+Now we fix the
+sd=1, 
+background sample size without significant change as 800, 
+sample size with significantly change as 200,
+sliding mean difference from 1 to 2.5
+
+
+### difference of mean: 1
+```{r echo = TRUE, message=FALSE, warning=FALSE, fig.width = 8, fig.height= 5, class.source = 'fold-hide'}
+simulation_function(mean_difference = 1, number_features_nochange = 800)
+```
+
+
+## difference of mean: 1.5
+
+```{r echo = TRUE, message=FALSE, warning=FALSE, fig.width = 8, fig.height= 5, class.source = 'fold-hide'}
+simulation_function(mean_difference = 1.5, number_features_nochange = 800)
+```
+
+
+## difference of mean: 2
+
+```{r echo = TRUE, message=FALSE, warning=FALSE, fig.width = 8, fig.height= 5, class.source = 'fold-hide'}
+simulation_function(mean_difference = 2, number_features_nochange = 800)
+```
+
+## difference of mean: 2.5
+
+```{r echo = TRUE, message=FALSE, warning=FALSE, fig.width = 8, fig.height= 5, class.source = 'fold-hide'}
+simulation_function(mean_difference = 2.5, number_features_nochange = 800)
+```
+
+
+# Simluation 2: 200 out of 10000
+
+
+Now we fix the
+sd=1, 
+background sample size without significant change as 9800, 
+sample size with significantly change as 200,
+sliding mean difference from 1 to 2.5
+
+
+### difference of mean: 1
+```{r echo = TRUE, message=FALSE, warning=FALSE, fig.width = 8, fig.height= 5, class.source = 'fold-hide'}
+simulation_function(mean_difference = 1, number_features_nochange = 9800)
+```
+
+
+## difference of mean: 1.5
+
+```{r echo = TRUE, message=FALSE, warning=FALSE, fig.width = 8, fig.height= 5, class.source = 'fold-hide'}
+simulation_function(mean_difference = 1.5, number_features_nochange = 9800)
+```
+
+
+## difference of mean: 2
+
+```{r echo = TRUE, message=FALSE, warning=FALSE, fig.width = 8, fig.height= 5, class.source = 'fold-hide'}
+simulation_function(mean_difference = 2, number_features_nochange = 9800)
+```
+
+## difference of mean: 2.5
+
+```{r echo = TRUE, message=FALSE, warning=FALSE, fig.width = 8, fig.height= 5, class.source = 'fold-hide'}
+simulation_function(mean_difference = 2.5, number_features_nochange = 9800)
+```
+
+
+
+# Conclusion
+
+The conclusion is pretty depressing. 
+For a small sample size with 200 out of 1000, which is 1/5 changed from simulation 1, if the difference equals to the sd, even 20
+
+
+# todo
+
+For the next step, I would like to include the false positive rate curve, though it is pretty obvious.
+
+# sessionInfo
+
+```{r}
+sessionInfo()
+```

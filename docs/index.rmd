@@ -1,6 +1,10 @@
 # Some practical questions about metaprotomics data analysis
 
-* [how to deal with function redundancy](./how_to_deal_with_function_redundancy.html)
+* [How to deal with function redundancy](./how_to_deal_with_function_redundancy.html)
  
-* [umap vs PCA](umap_dimention_reduction_demo.html)
+* [UMAP vs PCA](umap_dimention_reduction_demo.html)
+
+* [How many replicates do we need](how_many_replicates_needed.html)
+
+* [Practical ggplot2 examples](Practical_examples_of_ggplot2.html)
  
