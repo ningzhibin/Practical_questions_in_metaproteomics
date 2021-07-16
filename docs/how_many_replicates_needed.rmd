@@ -39,7 +39,9 @@ output:
 ```
 # Abstract
 
-It is a frequently asked question that how many 
+It is a frequently asked question that how many replicates do we need? (hidden message is to pick up enough/all significantly changed proteins/features)
+
+This document is to simulate that, trying to answer this question. 
 
 Readers can use this function to see effects of some other parameters on the number of replicates with different change (mean difference)  
 
@@ -53,6 +55,8 @@ Idea:
 * A fraction of the proteins/peptides are significantly changed between the two samples, with defined meand difference. 
 * with SD set 1, it is easy to estimate the difference between control and sample
 
+* pvalue is calculated based on two-sample t-test, while the qvalue here is the FDR adjusted p-value
+* In the output figure, the y is normalized to percentage, for easy comparison
 
 
 Default parameters:
@@ -73,11 +77,15 @@ Default parameters:
 
 
 
+
+
 ```{r  message=FALSE, warning=FALSE,class.source = 'fold-hide'}
 
 library(ggplot2)
 library(reshape2)
 library(tidyverse)
+
+
 
 simulation_function<- function(pool_sample_size = 100000,
                     mean_difference  = 3,
@@ -104,23 +112,23 @@ simulation_function<- function(pool_sample_size = 100000,
       
       
       # background_ctrl, from pool_normal_1
-      matrix_background_control <- matrix(sample(pool_normal_1, n_rep* number_features_nochange, replace = TRUE), ncol =  n_rep)
+      matrix_background_control <- as.data.frame(matrix(sample(pool_normal_1, n_rep* number_features_nochange, replace = TRUE), ncol =  n_rep))
       colnames(matrix_background_control) <- paste0(rep("ctr_rep", n_rep), 1:n_rep)
       
+      
       # background_sample from pool_normal_1
-      matrix_background_sample <- matrix(sample(pool_normal_1, n_rep* number_features_nochange, replace = TRUE), ncol =  n_rep)
+      matrix_background_sample <- as.data.frame(matrix(sample(pool_normal_1, n_rep* number_features_nochange, replace = TRUE), ncol =  n_rep))
       colnames(matrix_background_sample) <- paste0(rep("sample_rep", n_rep), 1:n_rep)
       
       
-      
       # control
-      matrix_control <- matrix(sample(pool_normal_1, n_rep* number_features_changed, replace = TRUE), ncol =  n_rep)
+      matrix_control <- as.data.frame(matrix(sample(pool_normal_1, n_rep* number_features_changed, replace = TRUE), ncol =  n_rep))
       colnames(matrix_control) <- paste0(rep("ctr_rep", n_rep), 1:n_rep)
       
       matrix_control <- rbind(matrix_control, matrix_background_control)
       
       # sample
-      matrix_sample <- matrix(sample(pool_normal_2, n_rep* number_features_changed, replace = TRUE), ncol =  n_rep)
+      matrix_sample <- as.data.frame(matrix(sample(pool_normal_2, n_rep* number_features_changed, replace = TRUE), ncol =  n_rep))
       colnames(matrix_sample) <- paste0(rep("sample_rep", n_rep), 1:n_rep)
       
       matrix_sample <- rbind(matrix_sample, matrix_background_sample)
@@ -142,15 +150,26 @@ simulation_function<- function(pool_sample_size = 100000,
     
     
     # format the pvalue and qvalue into data.frame and melt
-    p_value_combined <- data.frame(p_value_list)
-    names(p_value_combined) <- paste0( "perm", 1:perm)
-    q_value_combined <- data.frame(q_value_list)
-    names(q_value_combined) <- paste0( "perm", 1:perm)
+      # p_value_combined <- data.frame(p_value_list)
+      # names(p_value_combined) <- paste0( "perm", 1:perm)
+      # q_value_combined <- data.frame(q_value_list)
+      # names(q_value_combined) <- paste0( "perm", 1:perm)
     
     # summary the number of qualified pvalue 
-    pvalue_qualified <- unlist(lapply(p_value_list, function(x) {length(which(x < 0.05))}))
-    qvalue_qualified <- unlist(lapply(q_value_list, function(x) {length(which(x < 0.05))}))
-    summary <- data.frame(pvalue_qualified,qvalue_qualified)
+    All_qualified_pvalue <- unlist(lapply(p_value_list, function(x) {length(which(x < 0.05))}))
+    True_Positive_pvalue <- unlist(lapply(p_value_list, function(x) {length( which((which(x < 0.05) <= number_features_changed)))}))
+    False_Positive_pvalue <- All_qualified_pvalue - True_Positive_pvalue 
+    
+    
+    # we put the significant changed items at the top, therefore there index should be equal or less than number_features_changed
+    
+    All_qualified_qvalue <- unlist(lapply(q_value_list, function(x) {length(which(x < 0.05))}))
+    True_Positive_qvalue <- unlist(lapply(q_value_list, function(x) {length( which((which(x < 0.05) <= number_features_changed)))}))
+    False_Positive_qvalue <- All_qualified_qvalue - True_Positive_qvalue 
+    
+    # change to percentatge
+    summary <- 100*data.frame(All_qualified_pvalue,All_qualified_qvalue,True_Positive_pvalue,True_Positive_qvalue,False_Positive_pvalue,False_Positive_qvalue)/number_features_changed
+    
     row.names(summary) <- paste0( "perm", 1:perm)
     
     
@@ -159,25 +178,25 @@ simulation_function<- function(pool_sample_size = 100000,
     
   }
   
-  
+
   
   data_plot_allperm <- summary_list %>% 
     as.data.frame() %>% 
     rownames_to_column() %>% 
     melt() %>% 
-    separate(variable, c("rep", "method"),sep = "\\.") %>% 
+    separate(variable, c("rep", "Measures"),sep = "\\.") %>% 
     mutate(rep = as.factor(rep), rep = factor(rep, levels =paste0("rep", 2:number_of_replicate), labels = 2:number_of_replicate)) %>% 
-    group_by(rep, method) %>% 
+    group_by(rep, Measures) %>% 
     summarise(mean = mean(value), sd = sd(value)) 
   
   
   
-  p<- ggplot(data_plot_allperm, aes(x=rep, y=mean, group=method, color = method)) + 
+  p<- ggplot(data_plot_allperm, aes(x=rep, y=mean, group=Measures, color = Measures)) + 
     geom_line() +
     geom_point(stat="identity")+
     geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd), width=.2, position=position_dodge(0.05))+
-    ggtitle("How Many Replicates do We Need?") + ylab("Number of Significantly changed features identified")+ xlab("Number of Replicates Performed")+
-    annotate("text", x = c(13,13, 13, 13, 13), y = c(40, 30, 20, 10, 0), label = c(paste0("Mean difference: ",mean_difference), 
+    ggtitle("How Many Replicates do We Need?") + ylab("Percentage of Significantly changed features identified")+ xlab("Number of Replicates Performed")+
+    annotate("text", x = c(13,13, 13, 13, 13), y = c(80, 70, 60, 50, 40), label = c(paste0("Mean difference: ",mean_difference), 
                                                                                    paste0("SD: ", sd),
                                                                                    paste0("Number of significantly changed features: ",number_features_changed),
                                                                                    paste0("Number of not changed features: ", number_features_nochange),
@@ -188,6 +207,7 @@ simulation_function<- function(pool_sample_size = 100000,
   return((p))
   
 }
+
 
 ```
 
@@ -201,7 +221,7 @@ sample size with significantly change as 200,
 sliding mean difference from 1 to 2.5
 
 
-### difference of mean: 1
+## difference of mean: 1
 ```{r echo = TRUE, message=FALSE, warning=FALSE, fig.width = 8, fig.height= 5, class.source = 'fold-hide'}
 simulation_function(mean_difference = 1, number_features_nochange = 800)
 ```
@@ -237,7 +257,7 @@ sample size with significantly change as 200,
 sliding mean difference from 1 to 2.5
 
 
-### difference of mean: 1
+## difference of mean: 1
 ```{r echo = TRUE, message=FALSE, warning=FALSE, fig.width = 8, fig.height= 5, class.source = 'fold-hide'}
 simulation_function(mean_difference = 1, number_features_nochange = 9800)
 ```
@@ -266,13 +286,19 @@ simulation_function(mean_difference = 2.5, number_features_nochange = 9800)
 
 # Conclusion
 
-The conclusion is pretty depressing. 
-For a small sample size with 200 out of 1000, which is 1/5 changed from simulation 1, if the difference equals to the sd, even 20
+* The conclusion is pretty depressing
+
+* Three replicates in any casese are not good enough.
+
+* For a small sample size with 200 out of 1000, with a difference of 2.5 fold SD, up to 4, 5, 6 replicates are fairly good. 
+
+* If the difference is big enough(200 out of 10000), with the difference of 2.5 fold of SD, more than 10 replicates are needed to pickup all the significantly changed protein/peptides
 
 
-# todo
+* The conclusion can also be explained in a reversed angle, that replicates can only pickup some very significantly changed ones. 
+* When the background is large (compared to the number of significantly changed ones), using q-value is mandatory to enruse low FPR. 
 
-For the next step, I would like to include the false positive rate curve, though it is pretty obvious.
+
 
 # sessionInfo
 
