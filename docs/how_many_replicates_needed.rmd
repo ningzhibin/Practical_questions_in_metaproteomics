@@ -84,6 +84,7 @@ Default parameters:
 library(ggplot2)
 library(reshape2)
 library(tidyverse)
+library(plotly)
 
 
 
@@ -204,7 +205,7 @@ simulation_function<- function(pool_sample_size = 100000,
     ))
   
   
-  return((p))
+  return(ggplotly(p))
   
 }
 
