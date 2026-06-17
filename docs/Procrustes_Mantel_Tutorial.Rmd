@@ -1,0 +1,517 @@
+---
+title: "Procrustes & Mantel Tests — A Visual, Worked Tutorial"
+subtitle: "How the two methods work, with example data and comprehensive plots"
+date: "`r format(Sys.time(), '%Y-%m-%d')`"
+output:
+  html_document:
+    theme: flatly
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    number_sections: true
+    code_folding: show
+    self_contained: true
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, message = FALSE, warning = FALSE,
+  fig.align = "center", dpi = 110, dev = "png"
+)
+library(vegan)      # procrustes(), protest(), mantel(), vegdist()
+library(ggplot2)
+library(ggrepel)
+library(patchwork)  # combine ggplots
+library(reshape2)   # melt() for heatmaps
+
+set.seed(42)        # full reproducibility
+
+theme_set(theme_minimal(base_size = 12))
+pal_grp <- c("#1B9E77", "#D95F02", "#7570B3")   # 3 groups
+```
+
+# What problem do these two tests solve?
+
+Both **Procrustes** and **Mantel** answer one family of question:
+
+> *"I measured the **same set of objects** in two different ways (two datasets, two
+> conditions, two ordinations). Do the objects keep the **same relationships to one
+> another** in both?"*
+
+The "objects" might be samples, sites, individuals, or experimental units, and the
+two "ways of measuring" might be two data types, two time points, two methods, or
+two conditions. A typical question is: *"is the structure I see among my samples
+reproducible across the two measurements?"* — and that is exactly a *"same objects,
+two measurements, is the configuration preserved?"* question.
+
+The two tests attack it from different angles:
+
+| Test | Compares | Works on | Output | Intuition |
+|------|----------|----------|--------|-----------|
+| **Procrustes** (`protest`) | Two **ordinations** (point maps, e.g. PCA scores) | Coordinate configurations | correlation `r` + permutation `p` | "After I rotate/scale one map onto the other, do the points land on top of each other?" |
+| **Mantel** (`mantel`) | Two **distance matrices** | All pairwise distances | Mantel `r` + permutation `p` | "If A and B are far apart in dataset 1, are they also far apart in dataset 2?" |
+
+Both report a correlation in `[-1, 1]` (closer to 1 = better agreement) and a
+**permutation-based p-value** for "is this agreement more than random chance?".
+
+---
+
+# PART I — Procrustes analysis
+
+## The geometric idea {.tabset}
+
+Procrustes is named after a figure from Greek myth who stretched or chopped
+travellers to fit his iron bed. Procrustes analysis does the gentler version: it
+takes one cloud of points and **translates, scales, rotates, and (optionally)
+reflects** it — operations that do **not** distort the *internal shape* — so that it
+lies as close as possible on top of a second cloud of the same points.
+
+What it is allowed to change:
+
+- **Translation** — slide the whole cloud (remove differences in centre/origin).
+- **Scaling** — shrink/grow the whole cloud uniformly (remove differences in units).
+- **Rotation / reflection** — spin or mirror the cloud (PCA axes are arbitrary in
+  sign and orientation, so this is essential).
+
+What it is **not** allowed to change: the relative positions of points *within* the
+cloud. That is the "shape" we are testing.
+
+Let's see it on a simple labelled shape so the mechanics are crystal clear.
+
+### Step 1 — build a target shape
+
+```{r proc-geo-build, fig.width=6, fig.height=5, fig.cap="**Figure 1.** A small target configuration of 8 labelled points (the 'true' arrangement). We will later try to recover this arrangement from a deliberately distorted copy. Each point is an 'object'; its position encodes its relationships to the others."}
+# 8 labelled objects placed at known positions = the "target" configuration X
+X <- data.frame(
+  id = LETTERS[1:8],
+  x  = c(0, 1, 2, 3, 3, 2, 1, 0.5),
+  y  = c(0, 0.4, 0.2, 1, 2, 2.5, 2, 1)
+)
+
+ggplot(X, aes(x, y, label = id)) +
+  geom_path(color = "grey70") +
+  geom_point(size = 4, color = "#1B9E77") +
+  geom_text(color = "white", fontface = "bold", size = 3) +
+  coord_equal() +
+  labs(title = "Target configuration X", x = "axis 1", y = "axis 2")
+```
+
+### Step 2 — make a distorted copy
+
+```{r proc-geo-distort, fig.width=6, fig.height=5, fig.cap="**Figure 2.** The same 8 objects after a rigid distortion: the cloud was rotated by 50°, scaled to 60% size, shifted away from the origin, and given a little random jitter. The *shape* is essentially preserved, but the raw coordinates look completely different from Figure 1 — exactly the situation when two PCA ordinations describe the same objects on arbitrary axes."}
+theta <- 50 * pi / 180                       # rotation angle
+R     <- matrix(c(cos(theta), -sin(theta),
+                  sin(theta),  cos(theta)), 2, 2)
+scale_f <- 0.6                               # uniform shrink
+shift   <- c(5, 2)                           # translation
+
+M <- as.matrix(X[, c("x", "y")]) %*% R * scale_f          # rotate + scale
+M <- sweep(M, 2, shift, "+")                              # translate
+M <- M + matrix(rnorm(length(M), 0, 0.08), ncol = 2)      # small noise
+Y <- data.frame(id = X$id, x = M[, 1], y = M[, 2])
+
+ggplot(Y, aes(x, y, label = id)) +
+  geom_path(color = "grey70") +
+  geom_point(size = 4, color = "#D95F02") +
+  geom_text(color = "white", fontface = "bold", size = 3) +
+  coord_equal() +
+  labs(title = "Distorted copy Y (rotated, scaled, shifted, jittered)",
+       x = "axis 1", y = "axis 2")
+```
+
+### Step 3 — superimpose with Procrustes
+
+```{r proc-geo-fit, fig.width=6, fig.height=5, fig.cap="**Figure 3.** Procrustes superimposition. The green points are the target X; the orange points are Y after Procrustes has optimally translated, scaled, and rotated it back onto X. Grey arrows connect each object's target position to its rotated position — they are the *residuals*. The arrows are tiny, so the two configurations are nearly identical once the arbitrary rotation/scale/shift is removed. This is what a high Procrustes correlation looks like."}
+# vegan::procrustes(target, to-be-rotated): rotates 2nd onto 1st
+pro_geo <- procrustes(X[, c("x", "y")], Y[, c("x", "y")], scale = TRUE)
+
+geo_df <- data.frame(
+  id  = X$id,
+  tx  = pro_geo$X[, 1],  ty  = pro_geo$X[, 2],   # target
+  rx  = pro_geo$Yrot[, 1], ry = pro_geo$Yrot[, 2] # rotated Y
+)
+
+ggplot(geo_df) +
+  geom_segment(aes(x = tx, y = ty, xend = rx, yend = ry),
+               arrow = arrow(length = unit(0.18, "cm")), color = "grey55") +
+  geom_point(aes(tx, ty), color = "#1B9E77", size = 4) +
+  geom_point(aes(rx, ry), color = "#D95F02", size = 2.5) +
+  geom_text_repel(aes(tx, ty, label = id), size = 3) +
+  coord_equal() +
+  labs(title = "After Procrustes: Y rotated back onto X",
+       subtitle = "green = target X · orange = rotated Y · arrows = residuals",
+       x = "Procrustes axis 1", y = "Procrustes axis 2")
+```
+
+## The maths, briefly
+
+Given a target configuration $X$ and a second configuration $Y$ (both $n$ objects ×
+$k$ dimensions, columns centred), Procrustes finds a rotation/reflection matrix
+$Q$ (orthogonal), a scalar scaling $c$, and a translation $b$ that minimise the sum
+of squared residuals:
+
+$$
+m^2 \;=\; \min_{Q,\,c,\,b}\; \sum_{i=1}^{n} \big\lVert\, x_i - (c\,Q\,y_i + b) \,\big\rVert^2 .
+$$
+
+The optimal rotation comes from the **singular value decomposition** of the
+cross-product $X^\top Y = U \Sigma V^\top$, giving $Q = V U^\top$. After normalising
+both configurations to unit size, `vegan` reports the **symmetric Procrustes
+statistic** $m_{12}^2$, and the **Procrustes correlation**
+
+$$
+r \;=\; \sqrt{\,1 - m_{12}^2\,}\,,
+$$
+
+so $r = 1$ means a perfect superimposition (zero residuals) and $r \to 0$ means the
+two configurations are unrelated.
+
+`protest()` adds a **permutation test (PROTEST)**: it repeatedly shuffles the row
+labels of $Y$, recomputes $m_{12}^2$ each time, and asks how often a *random*
+pairing fits as well as the real one. That fraction is the p-value.
+
+```{r proc-geo-stats}
+# protest() reports the Procrustes correlation r and a permutation p-value
+pt_geo <- protest(X[, c("x", "y")], Y[, c("x", "y")], permutations = 999)
+pt_geo
+cat(sprintf("\nProcrustes correlation r = %.4f  (1 = perfect overlay)\n", pt_geo$t0))
+```
+
+## A realistic example: the same samples measured twice
+
+Now we apply the test to a realistic high-dimensional example. We invent **12
+samples** that belong to **3 groups**. The group fixes *where a sample sits* in a
+hidden 2-D "structure space". We then generate **high-dimensional measurements
+under two conditions** from that same hidden structure, so the relationships between
+samples *should* be preserved across conditions — plus realistic
+condition-specific noise.
+
+```{r make-data, fig.cap="(data generation — no figure)"}
+n_samp  <- 12
+n_feat  <- 60
+samp_ids <- sprintf("S%02d", 1:n_samp)
+group    <- factor(rep(c("GroupA", "GroupB", "GroupC"), each = 4))
+
+# Hidden 2-D structure: 3 group centroids + within-group jitter.
+centroids <- rbind(c(-2, 0), c(2, 1), c(0, -2))
+latent <- centroids[as.integer(group), ] +
+          matrix(rnorm(n_samp * 2, 0, 0.45), ncol = 2)
+rownames(latent) <- samp_ids
+
+# Random feature 'loadings' map the 2-D structure onto 60 features.
+loadings <- matrix(rnorm(2 * n_feat), nrow = 2)
+
+# Generate a feature x sample matrix for one condition.
+make_dataset <- function(latent, loadings, noise = 0.6, base = 6) {
+  lin <- latent %*% loadings                      # samples x features
+  lin <- t(lin)                                   # features x samples
+  lin <- lin + rnorm(length(lin), 0, noise)       # condition-specific noise
+  vals <- exp(base + scale(lin))                  # strictly positive values
+  rownames(vals) <- sprintf("feat%02d", 1:nrow(vals))
+  colnames(vals) <- colnames(lin)
+  vals
+}
+
+data1 <- make_dataset(latent, loadings, noise = 0.6)
+data2 <- make_dataset(latent, loadings, noise = 0.6)   # same structure, new noise
+colnames(data1) <- colnames(data2) <- samp_ids
+
+# Optional preprocessing. For strictly positive / compositional data a centred
+# log-ratio (CLR) transform is common; for general data you might use scaling or
+# none. Here we centre each sample on the log scale.
+prep <- function(mat) {
+  mat[mat == 0] <- min(mat[mat > 0]) / 2
+  log_mat <- log(mat)
+  sweep(log_mat, 2, colMeans(log_mat), "-")       # subtract per-sample mean
+}
+m1 <- prep(data1)
+m2 <- prep(data2)
+
+meta <- data.frame(Sample = samp_ids, Group = group)
+knitr::kable(head(t(round(data1[1:5, ], 1))),
+             caption = "Peek at Dataset 1 values (first 5 features, all 12 samples).")
+```
+
+### Two ordinations of the same samples
+
+```{r two-pca, fig.width=10, fig.height=4.6, fig.cap="**Figure 4.** Independent PCA ordinations of the 12 samples in Dataset 1 (left) and Dataset 2 (right), each computed on that dataset's preprocessed matrix. Points are coloured by group. Note that the three groups separate in *both* datasets, but the axes are oriented/flipped differently (PCA sign and rotation are arbitrary). Procrustes exists precisely to align these two maps before comparing them."}
+pca1 <- prcomp(t(m1)); pca2 <- prcomp(t(m2))
+
+mk_pca_df <- function(pca, meta) {
+  d <- as.data.frame(pca$x[, 1:2]); d$Sample <- rownames(d)
+  merge(d, meta, by = "Sample")
+}
+d1 <- mk_pca_df(pca1, meta); d2 <- mk_pca_df(pca2, meta)
+
+p1 <- ggplot(d1, aes(PC1, PC2, color = Group, label = Sample)) +
+  geom_point(size = 3) + geom_text_repel(size = 3, show.legend = FALSE) +
+  scale_color_manual(values = pal_grp) + coord_equal() +
+  labs(title = "Dataset 1 — PCA of samples")
+p2 <- ggplot(d2, aes(PC1, PC2, color = Group, label = Sample)) +
+  geom_point(size = 3) + geom_text_repel(size = 3, show.legend = FALSE) +
+  scale_color_manual(values = pal_grp) + coord_equal() +
+  labs(title = "Dataset 2 — PCA of samples")
+p1 + p2 + plot_layout(guides = "collect")
+```
+
+### Procrustes superimposition of the two datasets
+
+```{r proc-real, fig.width=7, fig.height=6, fig.cap="**Figure 5.** Procrustes superimposition of the Dataset 1 and Dataset 2 ordinations. Black points are the Dataset 1 configuration (target); red points are the Dataset 2 configuration rotated onto it. Each arrow shows how far a sample 'moved' between datasets after alignment. Short arrows = the sample occupies the same relative position in both datasets. The title reports the Procrustes correlation and permutation p-value."}
+pro <- protest(pca1$x[, 1:2], pca2$x[, 1:2], permutations = 999)
+
+df_t <- as.data.frame(pro$X);    colnames(df_t) <- c("X", "Y")
+df_r <- as.data.frame(pro$Yrot); colnames(df_r) <- c("X", "Y")
+df_t$Sample <- df_r$Sample <- samp_ids
+combined <- rbind(cbind(df_t, set = "Dataset 1 (target)"),
+                  cbind(df_r, set = "Dataset 2 (rotated)"))
+
+ggplot() +
+  geom_segment(aes(x = df_t$X, y = df_t$Y, xend = df_r$X, yend = df_r$Y),
+               color = "grey60", arrow = arrow(length = unit(0.15, "cm"))) +
+  geom_point(data = combined, aes(X, Y, color = set), size = 3) +
+  geom_text_repel(data = df_t, aes(X, Y, label = Sample), size = 3) +
+  scale_color_manual(values = c("Dataset 1 (target)"  = "black",
+                                "Dataset 2 (rotated)" = "#E31A1C")) +
+  coord_equal() +
+  labs(title = "Procrustes: Dataset 1 vs Dataset 2",
+       subtitle = sprintf("correlation r = %.3f · p = %.3f (999 permutations)",
+                          pro$t0, pro$signif),
+       x = "Procrustes dim 1", y = "Procrustes dim 2", color = NULL)
+```
+
+### Which samples fit worst? (residual plot)
+
+```{r proc-resid, fig.width=7, fig.height=4.5, fig.cap="**Figure 6.** Per-sample Procrustes residuals — the length of each arrow in Figure 5. This diagnostic tells you *which* objects are responsible for any mismatch between the two configurations. Tall bars are samples whose relative position shifted the most between datasets; short bars are perfectly reproducible. The dashed line is the mean residual."}
+resid_vec <- residuals(pro)                # one residual per sample
+res_df <- data.frame(Sample = samp_ids, residual = resid_vec,
+                     Group = meta$Group)
+res_df <- res_df[order(res_df$residual), ]
+res_df$Sample <- factor(res_df$Sample, levels = res_df$Sample)
+
+ggplot(res_df, aes(Sample, residual, fill = Group)) +
+  geom_col() +
+  geom_hline(yintercept = mean(resid_vec), linetype = "dashed", color = "grey40") +
+  scale_fill_manual(values = pal_grp) +
+  labs(title = "Procrustes residuals per sample",
+       y = "residual (arrow length)", x = NULL) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+### Is r=`r round(pro$t0,3)` more than chance? (permutation null)
+
+```{r proc-perm, fig.width=7, fig.height=4.2, fig.cap="**Figure 7.** The PROTEST permutation null distribution. Grey bars show the Procrustes correlation obtained from 999 random re-pairings of the samples (i.e. the structure is destroyed on purpose). The red line is the observed correlation from the correct pairing. Because the observed value sits far to the right of the entire null distribution, the agreement is highly significant — the matching positions are not a coincidence. The p-value is the fraction of null values >= observed."}
+perm_r <- pro$t          # vector of permuted Procrustes correlations
+perm_df <- data.frame(r = perm_r)
+
+ggplot(perm_df, aes(r)) +
+  geom_histogram(bins = 30, fill = "grey75", color = "white") +
+  geom_vline(xintercept = pro$t0, color = "#E31A1C", linewidth = 1.2) +
+  annotate("text", x = pro$t0, y = Inf, vjust = 2, hjust = 1.1,
+           label = sprintf("observed r = %.3f\np = %.3f", pro$t0, pro$signif),
+           color = "#E31A1C") +
+  labs(title = "PROTEST permutation null distribution",
+       x = "Procrustes correlation under random pairing", y = "count")
+```
+
+---
+
+# PART II — Mantel test
+
+## The idea
+
+Procrustes works on *coordinates*. The **Mantel test** skips coordinates entirely
+and works directly on **distance matrices**. The logic:
+
+1. For dataset 1, compute the full $n \times n$ matrix of pairwise distances
+   between objects (here: Euclidean distance on the preprocessed values).
+2. Do the same for dataset 2.
+3. Take the lower triangles of both matrices, line them up, and compute their
+   correlation. That correlation is the **Mantel statistic** $r_M$.
+
+If objects that are far apart in dataset 1 are also far apart in dataset 2 (and
+close pairs stay close), the two lists of distances are correlated and $r_M \to 1$.
+
+Because the entries of a distance matrix are **not independent** (every object
+appears in $n-1$ distances), you cannot use an ordinary correlation p-value. Mantel
+instead permutes the rows+columns of one matrix many times to build a null
+distribution for $r_M$.
+
+$$
+r_M \;=\; \operatorname{corr}\big(\, d^{(1)}_{ij},\; d^{(2)}_{ij} \,\big)
+\quad\text{for all pairs } i<j .
+$$
+
+Below we use **Spearman** (rank) correlation, which detects *monotonic* agreement
+and is robust to non-linear scaling between the two distance scales. (Pearson is
+also available.)
+
+## The two distance matrices
+
+```{r mantel-dist, fig.width=10, fig.height=4.6, fig.cap="**Figure 8.** Distance matrices between the 12 samples in Dataset 1 (left) and Dataset 2 (right). Dark = similar (small distance), light = dissimilar. The two heatmaps share the same block pattern — samples cluster by group in both datasets — which is the visual signature of a high Mantel correlation. Mantel formalises 'do these two matrices look alike?' into a single number with a p-value."}
+d1_mat <- as.matrix(dist(t(m1)))   # Euclidean distance on preprocessed values
+d2_mat <- as.matrix(dist(t(m2)))
+
+heat <- function(m, title) {
+  mm <- melt(m)
+  ggplot(mm, aes(Var1, Var2, fill = value)) +
+    geom_tile() +
+    scale_fill_viridis_c(direction = -1, name = "distance") +
+    coord_equal() +
+    labs(title = title, x = NULL, y = NULL) +
+    theme(axis.text = element_text(size = 7),
+          axis.text.x = element_text(angle = 90, hjust = 1))
+}
+heat(d1_mat, "Dataset 1 — distances") +
+  heat(d2_mat, "Dataset 2 — distances")
+```
+
+## The heart of the test: distance-vs-distance scatter
+
+```{r mantel-scatter, fig.width=6.5, fig.height=5.5, fig.cap="**Figure 9.** The Mantel test in one picture. Each grey dot is **one pair of samples**; its x-position is that pair's distance in Dataset 1 and its y-position is the same pair's distance in Dataset 2. There are choose(12,2)=66 dots. A tight upward trend means pairwise structure is preserved across datasets. The blue line is a linear fit (for the eye); the reported statistic is the Spearman correlation of these points, which is exactly the Mantel r."}
+lower <- lower.tri(d1_mat)
+pair_df <- data.frame(d1 = d1_mat[lower], d2 = d2_mat[lower])
+
+man <- mantel(as.dist(d1_mat), as.dist(d2_mat),
+              method = "spearman", permutations = 999)
+
+ggplot(pair_df, aes(d1, d2)) +
+  geom_smooth(method = "lm", se = FALSE, color = "#377EB8", linewidth = 0.8) +
+  geom_point(alpha = 0.6, color = "grey30") +
+  labs(title = "Pairwise distances: Dataset 1 vs Dataset 2",
+       subtitle = sprintf("Mantel r (Spearman) = %.3f · p = %.3f (999 permutations)",
+                          man$statistic, man$signif),
+       x = "distance in Dataset 1", y = "distance in Dataset 2")
+```
+
+## Mantel permutation null
+
+```{r mantel-perm, fig.width=7, fig.height=4.2, fig.cap="**Figure 10.** Mantel permutation null distribution. Grey bars are Mantel r values obtained after randomly permuting the rows/columns of one distance matrix 999 times (destroying any real correspondence). The red line is the observed Mantel r. It lies far outside the null, so the correlation between the two distance structures is highly significant."}
+man_perm <- data.frame(r = man$perm)
+
+ggplot(man_perm, aes(r)) +
+  geom_histogram(bins = 30, fill = "grey75", color = "white") +
+  geom_vline(xintercept = man$statistic, color = "#E31A1C", linewidth = 1.2) +
+  annotate("text", x = man$statistic, y = Inf, vjust = 2, hjust = 1.1,
+           label = sprintf("observed r = %.3f\np = %.3f",
+                           man$statistic, man$signif),
+           color = "#E31A1C") +
+  labs(title = "Mantel permutation null distribution",
+       x = "Mantel r under permutation", y = "count")
+```
+
+---
+
+# PART III — A counter-example: when structure is NOT preserved
+
+To build intuition it helps to see what a **failure** looks like. We create a third
+dataset whose samples are **randomly relabelled**, so any shared structure is
+destroyed. Both tests should now return low correlations and non-significant
+p-values.
+
+```{r broken, fig.width=10, fig.height=4.6, fig.cap="**Figure 11.** Negative control. Left: Procrustes superimposition when Dataset 2's samples are scrambled — arrows are long and point every direction, and the correlation collapses. Right: the Mantel distance-vs-distance scatter becomes a shapeless cloud. Compare with Figures 5 and 9. This is the appearance of 'no reproducible structure', and both p-values are non-significant."}
+set.seed(7)
+scramble <- sample(samp_ids)                # random relabelling
+m2_scr <- m2[, scramble]
+colnames(m2_scr) <- samp_ids
+pca2_scr <- prcomp(t(m2_scr))
+
+pro_bad <- protest(pca1$x[, 1:2], pca2_scr$x[, 1:2], permutations = 999)
+d2_scr  <- as.matrix(dist(t(m2_scr)))
+man_bad <- mantel(as.dist(d1_mat), as.dist(d2_scr),
+                  method = "spearman", permutations = 999)
+
+# Procrustes plot (bad)
+bt <- as.data.frame(pro_bad$X);    colnames(bt) <- c("X","Y")
+br <- as.data.frame(pro_bad$Yrot); colnames(br) <- c("X","Y")
+bt$id <- br$id <- samp_ids
+pbad <- ggplot() +
+  geom_segment(aes(x = bt$X, y = bt$Y, xend = br$X, yend = br$Y),
+               color = "grey60", arrow = arrow(length = unit(0.15, "cm"))) +
+  geom_point(aes(bt$X, bt$Y), color = "black", size = 3) +
+  geom_point(aes(br$X, br$Y), color = "#E31A1C", size = 2.5) +
+  coord_equal() +
+  labs(title = "Procrustes — scrambled (FAIL)",
+       subtitle = sprintf("r = %.3f · p = %.3f", pro_bad$t0, pro_bad$signif),
+       x = "dim 1", y = "dim 2")
+
+# Mantel scatter (bad)
+pair_bad <- data.frame(d1 = d1_mat[lower], d2 = d2_scr[lower])
+mbad <- ggplot(pair_bad, aes(d1, d2)) +
+  geom_smooth(method = "lm", se = FALSE, color = "#377EB8", linewidth = 0.8) +
+  geom_point(alpha = 0.6, color = "grey30") +
+  labs(title = "Mantel — scrambled (FAIL)",
+       subtitle = sprintf("r = %.3f · p = %.3f", man_bad$statistic, man_bad$signif),
+       x = "distance in Dataset 1", y = "distance in Dataset 2 (scrambled)")
+
+pbad + mbad
+```
+
+---
+
+# PART IV — Side-by-side summary
+
+```{r summary-table}
+summary_tab <- data.frame(
+  Comparison   = c("Dataset 1 vs 2 (real)", "Dataset 1 vs 2 (scrambled)"),
+  Procrustes_r = round(c(pro$t0,        pro_bad$t0), 3),
+  Procrustes_p = c(pro$signif,          pro_bad$signif),
+  Mantel_r     = round(c(man$statistic, man_bad$statistic), 3),
+  Mantel_p     = c(man$signif,          man_bad$signif)
+)
+knitr::kable(summary_tab,
+  caption = "Both tests agree: the real pairing is strongly significant, the scrambled control is not.")
+```
+
+## How to read the two tests together
+
+- **They corroborate each other.** Procrustes compares the *low-dimensional
+  ordination layout* (here the first 2 PCs — the dominant structure you can plot).
+  Mantel compares the *full-dimensional* pairwise distance structure. When both are
+  high and significant, the conclusion is robust to the choice of method.
+- **Procrustes is better for visualising** *which* objects disagree (Figures 5–6).
+- **Mantel uses all dimensions** and (with Spearman) tolerates non-linear scaling
+  between the two distance scales.
+
+## Practical caveats
+
+1. **Same objects, same order.** Both tests require the identical set of objects in
+   both datasets. In practice, take the intersection of the object labels and align
+   the two matrices/configurations to the same order before testing, e.g.
+   `common <- intersect(colnames(mat1), colnames(mat2))`.
+2. **Procrustes on a few axes only.** Feeding `prcomp(...)$x[, 1:2]` to `protest`
+   measures agreement of the *dominant 2-D* structure, not the full configuration.
+   Use more axes (or the full coordinates) if later dimensions matter.
+3. **Permutation p-values are discrete.** With 999 permutations the smallest
+   possible p-value is 0.001 — that is why you often see `p = 0.001`, not `p = 0`.
+4. **Mantel measures correlation of distances, not group differences.** To test
+   whether a *grouping variable* explains the structure, use a method such as
+   PERMANOVA (`vegan::adonis2`) instead.
+5. **Choose the distance and preprocessing to match your data.** For compositional
+   data a centred log-ratio (CLR) transform with Euclidean (Aitchison) distance is
+   common; for other data, pick a distance/transform appropriate to the domain.
+
+---
+
+# Reference: the two core function calls
+
+```r
+# Procrustes (with permutation test) on two ordinations of the same objects
+library(vegan)
+common <- intersect(colnames(mat1), colnames(mat2))
+pca1 <- prcomp(t(mat1[, common]))
+pca2 <- prcomp(t(mat2[, common]))
+pro  <- protest(pca1$x[, 1:2], pca2$x[, 1:2], permutations = 999)
+pro$t0      # Procrustes correlation
+pro$signif  # permutation p-value
+
+# Mantel test on the two distance matrices
+man <- mantel(dist(t(mat1[, common])), dist(t(mat2[, common])),
+              method = "spearman", permutations = 999)
+man$statistic  # Mantel r
+man$signif     # permutation p-value
+```
+
+```{r session}
+sessionInfo()
+```
